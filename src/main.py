@@ -51,7 +51,7 @@ async def part2_guardrails():
     print("(LLM-as-Judge / NeMo — optional, skipped)")
 
 
-async def part3_assignment_suite():
+async def part3_assignment_suite(*, resume=False):
     """Checkpoint 3: defense suite → outputs/results.json."""
     print("\n" + "=" * 60)
     print("CHECKPOINT 3: Assignment suite → outputs/*.json")
@@ -67,7 +67,7 @@ async def part3_assignment_suite():
         plugins = build_production_plugins(use_llm_judge=False)
         audit, monitor = build_observability()
         pipeline = {"plugins": plugins, "audit": audit, "monitor": monitor}
-        result = await run_assignment_suite(pipeline)
+        result = await run_assignment_suite(pipeline, resume=resume)
         print("Suite finished.")
         print("Wrote outputs under repo outputs/")
         return result
@@ -92,7 +92,10 @@ async def part4_attacks():
     from attacks.attacks import run_attacks, save_attack_results
 
     red_default, red_default_runner = create_red_agent_default()
-    await test_agent(red_default, red_default_runner)
+    try:
+        await test_agent(red_default, red_default_runner)
+    except Exception as exc:
+        print(f"Quick test failed: {type(exc).__name__}; attacks will record their own results.")
 
     print("\n--- Attacks on Red ---")
     unsafe_results = await run_attacks(
@@ -125,6 +128,11 @@ async def part4_attacks():
         print(f"Đang dùng model khó ({provider_label()}) — tuỳ chọn khi săn bonus.")
     print("=" * 60)
 
+    failures = sum(bool(r.get("error") or r.get("layer") in {"error", "nemo_error"})
+                   for r in unsafe_results + guards_results)
+    if failures:
+        raise RuntimeError(f"Attack suite has {failures} failed requests; see outputs/attack_results.json")
+
     return {
         "red_default": unsafe_results,
         "red_advance": guards_results,
@@ -133,17 +141,17 @@ async def part4_attacks():
     }
 
 
-async def main(parts=None):
-    setup_api_key()
-
+async def main(parts=None, *, resume=False):
     if parts is None:
         parts = [2, 3, 4]  # Core: CP2 → CP3 → CP4
+    if any(part in (3, 4) for part in parts):
+        setup_api_key()
 
     for part in parts:
         if part == 2:
             await part2_guardrails()
         elif part == 3:
-            await part3_assignment_suite()
+            await part3_assignment_suite(resume=resume)
         elif part == 4:
             await part4_attacks()
         else:
@@ -167,9 +175,13 @@ if __name__ == "__main__":
         choices=[2, 3, 4],
         help="2=CP2 guardrails · 3=CP3 suite · 4=CP4 red-team",
     )
+    parser.add_argument("--resume", action="store_true",
+                        help="CP3: retain earlier live results and retry failed API requests")
     args = parser.parse_args()
+    if args.resume and args.part != 3:
+        parser.error("--resume requires --part 3")
 
     if args.part:
-        asyncio.run(main(parts=[args.part]))
+        asyncio.run(main(parts=[args.part], resume=args.resume))
     else:
         asyncio.run(main())

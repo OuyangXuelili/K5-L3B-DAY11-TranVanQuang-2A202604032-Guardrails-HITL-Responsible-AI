@@ -8,6 +8,7 @@ Gemini Red Team dùng Google ADK trong agents/*.py — không đi qua file này.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -49,7 +50,8 @@ class OpenAIRunner:
     def _client(self):
         from openai import OpenAI
 
-        return OpenAI(**(self.client_kwargs or {}))
+        kwargs = {"timeout": 60.0, "max_retries": 0, **(self.client_kwargs or {})}
+        return OpenAI(**kwargs)
 
     async def chat(self, agent: OpenAIAgent, user_message: str) -> str:
         for hook in self.input_hooks:
@@ -62,15 +64,21 @@ class OpenAIRunner:
             return block_msg
 
         client = self._client()
-        completion = client.chat.completions.create(
+        completion = await asyncio.to_thread(
+            client.chat.completions.create,
             model=self.model,
             messages=[
                 {"role": "system", "content": agent.instruction},
                 {"role": "user", "content": user_message},
             ],
             temperature=self.temperature,
+            # Blue's fixed model spends part of this budget on mandatory reasoning.
+            max_tokens=1536 if self.provider == "openrouter" else 512,
         )
         text = (completion.choices[0].message.content or "").strip()
+        if not text:
+            reason = getattr(completion.choices[0], "finish_reason", None)
+            raise RuntimeError(f"Model returned no visible text (finish_reason={reason})")
 
         for hook in self.output_hooks:
             text = hook(text)

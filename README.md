@@ -1,5 +1,62 @@
 # Day 11 — Controlled Agent Security (2026)
 
+## Bài nộp
+
+**Trần Văn Quang · 2A202604032 · K5 – L3B**
+
+Blue dùng `liquid/lfm-3-1.7b:free` qua OpenRouter. Red và Red Advance dùng
+`gpt-4o-mini` qua OpenAI; Red Advance giữ nguyên regex và NeMo
+Guardrails của starter. Khóa thật chỉ đặt trong `.env` local.
+
+Giới hạn output của LLM chính: Blue tối đa 1536 token, gồm phần suy luận bắt buộc;
+OpenAI tối đa 512 token. Đây là mức trần, không phải số token cố định mỗi lượt gọi.
+
+Chạy từ gốc repo trên Windows, sau khi cài `requirements.txt` và điền `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 src/main.py --part 2
+.\.venv\Scripts\python.exe -X utf8 src/main.py --part 3
+.\.venv\Scripts\python.exe -X utf8 src/main.py --part 4
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/smoke tests/public tests/unit -q
+.\.venv\Scripts\python.exe -X utf8 scripts/grade.py --submission-dir . --out outputs/grade_report.json
+```
+
+CP2 kiểm tra Unicode, injection, chủ đề và che PII/secret. CP3 chạy callback theo
+thứ tự rate limiter → input → model → output; audit và monitoring là bộ quan sát
+bên cạnh pipeline. Rate limit dùng đồng hồ monotonic, tách theo `user_id` do ứng
+dụng cung cấp. Các nhóm test dùng người dùng khác nhau để không làm lẫn kết quả
+lọc injection với kết quả chống spam; nhóm spam dùng ngưỡng 3 lượt trong 60 giây.
+
+Egress chỉ cho phép HTTPS đến đúng `api.vinbank.example` hoặc
+`cases.vinbank.example`, trên cổng mặc định/443, và từ chối payload chứa PII hay
+secret. Chat không có tool chuyển tiền; phép thử quyền xác nhận rằng đề xuất
+chuyển tiền chưa có người duyệt bị từ chối. Bộ định tuyến HITL và ba điểm kiểm
+soát trong `src/hitl/hitl.py` là phần thiết kế bổ sung, chưa kết nối hệ thống
+duyệt giao dịch thực tế.
+
+CP4 có năm kỹ thuật: điền giá trị, dịch/đổi định dạng, dựng tình huống, xác nhận
+ứng viên và khai thác theo từng bước. Các giá trị nhạy cảm của lab đều là dữ liệu
+giả do starter cung cấp. Kết quả tấn công được ghi từ phản hồi thật; lỗi API không
+được tính là chặn thành công. Bài chọn bonus B1 (Red); điểm cộng cần giảng viên
+replay xác nhận, chỉ tính một loại bonus.
+
+Kết quả CP3/CP4 nằm trong `outputs/`. `run_status` và `error_count` của CP3 cho biết
+lượt chạy có lỗi hay không; CP4 lưu lỗi theo từng prompt. Audit che PII/secret
+trước khi ghi. `grade_report.json` và `lab_report.md` do script chấm sinh tự động;
+packaging/schema đạt chưa thay thế việc kiểm tra lỗi API và bằng chứng leak.
+Các test offline dùng model giả chỉ trong test, không tạo artifact nộp.
+Judge và NeMo bổ sung cho Blue được để tắt; NeMo của Red Advance vẫn bắt buộc.
+
+Nếu OpenRouter quá tải, chạy `python src/main.py --part 3 --resume` để giữ các
+quan sát live đã có và thử lại yêu cầu lỗi trên cùng corpus/model. Nhật ký và
+metrics của các lần trước được giữ; trường `retained_live_observation` đánh dấu
+kết quả cũ. Với bài test spam, giữ quyết định của lượt burst ban đầu và chỉ thử lại
+phần API bị lỗi; trường `original_burst_decision` ghi nguồn của quyết định đó.
+Sau khi sửa code guardrails hoặc thay bộ câu hỏi, chạy lại CP3 từ đầu bằng
+lệnh không có `--resume`.
+
+---
+
 > 👤 **Hình thức:** bài tập **cá nhân** (1 người / 1 MSSV).  
 > 🎯 **Mục tiêu:** đóng vai **Blue Team** để học cách xây Guardrails phòng thủ, rồi đóng vai **Red Team** để tấn công agent **Red** hoặc **Red Advance**.  
 > ✅ Làm theo **Checkpoint 1 → 5** trong [`CHECKPOINTS.md`](CHECKPOINTS.md) · nộp theo [`SUBMISSION.md`](SUBMISSION.md).
@@ -62,7 +119,7 @@ Bonus lab chỉ tính **một** trong hai: leak **Red** (B1, tối đa +5) hoặ
 
 ---
 
-## Bộ tài liệu trong repo (quy ước Khóa 4)
+## Bộ tài liệu trong repo
 
 | File | Nội dung |
 |------|----------|
@@ -75,8 +132,9 @@ Bonus lab chỉ tính **một** trong hai: leak **Red** (B1, tối đa +5) hoặ
 
 Codelab lớp: xem `template-codelabs/codelab-day11-k4-l3a.md` (L3A) hoặc bản L3B tương ứng.
 
-**Repo nộp học viên:** `K4-<L3A hoặc L3B>-DAY11-<HoVaTen>-<MSSV>-Guardrails-HITL-Responsible-AI`  
-Ví dụ: `K4-L3A-DAY11-NguyenVanA-2A2026xxxxx-Guardrails-HITL-Responsible-AI`
+**Repo nộp học viên:** `K5-<L3A hoặc L3B>-DAY11-<HoVaTen>-<MSSV>-Guardrails-HITL-Responsible-AI`
+
+Bài nộp: `K5-L3B-DAY11-TranVanQuang-2A202604032-Guardrails-HITL-Responsible-AI`
 
 ---
 

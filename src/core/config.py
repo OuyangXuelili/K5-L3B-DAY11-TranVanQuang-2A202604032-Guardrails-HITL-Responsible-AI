@@ -116,6 +116,7 @@ def blue_client_kwargs() -> dict:
     """OpenAI SDK kwargs pointing at OpenRouter (Blue Team only)."""
     return {
         "api_key": get_openrouter_api_key() or None,
+        "timeout": 60.0,
         "base_url": (
             os.environ.get("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL).strip()
             or OPENROUTER_BASE_URL

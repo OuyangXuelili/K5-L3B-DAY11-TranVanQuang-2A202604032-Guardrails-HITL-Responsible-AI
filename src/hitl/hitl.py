@@ -6,6 +6,7 @@ Lab 11 — Optional enrichment: Human-in-the-Loop Design
   - 3 HITL decision points
 """
 from dataclasses import dataclass
+import math
 
 
 # ============================================================
@@ -67,32 +68,17 @@ class ConfidenceRouter:
         Returns:
             RoutingDecision with routing action and metadata
         """
-        # Optional: Implement routing logic
-        #
-        # 1. Check if action_type is in HIGH_RISK_ACTIONS
-        #    -> If yes: always escalate (action="escalate", priority="high",
-        #       requires_human=True, reason="High-risk action: {action_type}")
-        #
-        # 2. Check confidence thresholds:
-        #    - confidence >= 0.9:
-        #      action="auto_send", priority="low",
-        #      requires_human=False, reason="High confidence"
-        #
-        #    - 0.7 <= confidence < 0.9:
-        #      action="queue_review", priority="normal",
-        #      requires_human=True, reason="Medium confidence — needs review"
-        #
-        #    - confidence < 0.7:
-        #      action="escalate", priority="high",
-        #      requires_human=True, reason="Low confidence — escalating"
-
-        return RoutingDecision(
-            action="auto_send",
-            confidence=confidence,
-            reason="TODO: implement routing logic",
-            priority="low",
-            requires_human=False,
-        )  # TODO: Replace with implementation
+        if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise ValueError("Confidence must be finite and between 0 and 1")
+        if action_type in HIGH_RISK_ACTIONS:
+            return RoutingDecision("escalate", confidence, f"High-risk action: {action_type}", "high", True)
+        if not response.strip():
+            return RoutingDecision("escalate", confidence, "Empty response needs review", "high", True)
+        if confidence >= self.HIGH_THRESHOLD:
+            return RoutingDecision("auto_send", confidence, "High confidence", "low", False)
+        if confidence >= self.MEDIUM_THRESHOLD:
+            return RoutingDecision("queue_review", confidence, "Medium confidence needs review", "normal", True)
+        return RoutingDecision("escalate", confidence, "Low confidence", "high", True)
 
 
 # ============================================================
@@ -115,33 +101,33 @@ class ConfidenceRouter:
 hitl_decision_points = [
     {
         "id": 1,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
-        "approval_path": "TODO: Explain approve, reject and timeout behavior",
-        "audit_fields": "TODO: List correlation ID, intent, diff and reviewer decision",
+        "name": "Phê duyệt chuyển tiền",
+        "trigger": "Mọi đề xuất transfer_money, bất kể độ tin cậy.",
+        "hitl_model": "human-in-the-loop",
+        "context_needed": "Người yêu cầu đã xác thực, số tiền, người nhận, hạn mức và dấu hiệu gian lận; che PII không cần thiết.",
+        "example": "Chat đề xuất chuyển 50 triệu đồng sau khi đọc một email ngoài.",
+        "approval_path": "Chờ duyệt gắn đúng nội dung giao dịch; từ chối hoặc hết hạn thì không thực hiện. Thay đổi người nhận/số tiền phải duyệt lại.",
+        "audit_fields": "request_id, authenticated_user, action, redacted_payload, payload_hash, reviewer_id, decision, decided_at, expires_at",
     },
     {
         "id": 2,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
-        "approval_path": "TODO: Explain approve, reject and timeout behavior",
-        "audit_fields": "TODO: List correlation ID, intent, diff and reviewer decision",
+        "name": "Đối chiếu câu trả lời chưa chắc chắn",
+        "trigger": "Độ tin cậy từ 0.7 đến dưới 0.9 hoặc dữ liệu lãi suất mâu thuẫn.",
+        "hitl_model": "human-as-tiebreaker",
+        "context_needed": "Câu hỏi, câu trả lời dự thảo, nguồn chính sách có ngày hiệu lực và điểm mâu thuẫn.",
+        "example": "Hai tài liệu ghi lãi suất tiết kiệm 12 tháng khác nhau.",
+        "approval_path": "Chuyên viên kiểm nguồn rồi duyệt/sửa; từ chối hoặc quá thời gian thì chuyển hỗ trợ, không tự gửi số liệu.",
+        "audit_fields": "request_id, source_ids, source_versions, draft_hash, proposed_diff, reviewer_id, decision, reason, decided_at",
     },
     {
         "id": 3,
-        "name": "TODO: Name this decision point",
-        "trigger": "TODO: When does this trigger?",
-        "hitl_model": "TODO: human-in-the-loop / human-on-the-loop / human-as-tiebreaker",
-        "context_needed": "TODO: What does the reviewer need to see?",
-        "example": "TODO: Give a concrete example scenario",
-        "approval_path": "TODO: Explain approve, reject and timeout behavior",
-        "audit_fields": "TODO: List correlation ID, intent, diff and reviewer decision",
+        "name": "Giám sát bất thường và rò rỉ",
+        "trigger": "Block rate hoặc số lần rate limit vượt ngưỡng; phát hiện PII/secret.",
+        "hitl_model": "human-on-the-loop",
+        "context_needed": "Metrics theo cửa sổ, lớp chặn, nhật ký đã che dữ liệu và phiên bản chính sách.",
+        "example": "Một phiên liên tục gửi yêu cầu lấy cấu hình nội bộ.",
+        "approval_path": "Hệ thống chặn ngay theo policy; người vận hành xác nhận sự cố và chọn cách xử lý. Hết thời gian vẫn giữ chặn, không tự mở quyền.",
+        "audit_fields": "alert_id, request_ids, metric, threshold, policy_version, reviewer_id, decision, remediation, decided_at",
     },
 ]
 

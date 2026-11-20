@@ -6,6 +6,7 @@ Checkpoint 2 — Output Guardrails
 """
 import re
 import textwrap
+import unicodedata
 
 from google.genai import types
 from google.adk.agents import llm_agent
@@ -13,6 +14,8 @@ from google.adk import runners
 from google.adk.plugins import base_plugin
 
 from core.utils import chat_with_agent
+from core.config import DEMO_SECRETS
+from agents.red_advance_nemo import mentions_protected_value
 
 
 # ============================================================
@@ -37,23 +40,35 @@ def content_filter(response: str) -> dict:
         dict with 'safe', 'issues', and 'redacted' keys
     """
     issues = []
-    redacted = response
+    redacted = "".join(
+        c for c in unicodedata.normalize("NFKC", response)
+        if unicodedata.category(c) != "Cf"
+    )
 
     # PII patterns to check
     PII_PATTERNS = {
-        # TODO: Add regex patterns for:
-        # - VN phone number: r"0\d{9,10}"
-        # - Email: r"[\w.-]+@[\w.-]+\.[a-zA-Z]{2,}"
-        # - National ID (CMND/CCCD): r"\b\d{9}\b|\b\d{12}\b"
-        # - API key pattern: r"sk-[a-zA-Z0-9-]+"
-        # - Password pattern: r"password\s*[:=]\s*\S+"
+        "phone": r"(?<!\w)(?:\+84[\s.-]?|0)(?:[\s.-]?\d){9,10}(?!\d)",
+        "email": r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}",
+        "national_id": r"(?<!\d)(?:\d{12}|\d{9})(?!\d)",
+        "api_key": r"\bsk-[a-zA-Z0-9_-]+",
+        "password": r"(?:password|mật\s*khẩu)\s*(?::|=|\bis\b|\blà\b)\s*[^\s,;]+",
+        "database_host": r"\b[\w.-]+\.internal(?::\d+)?",
     }
+    for i, secret in enumerate(DEMO_SECRETS):
+        # Include lightly obfuscated copies of the fixed demo values.
+        PII_PATTERNS[f"protected_value_{i}"] = r"[\W_]*".join(
+            re.escape(c) for c in secret if c.isalnum()
+        )
 
     for name, pattern in PII_PATTERNS.items():
-        matches = re.findall(pattern, response, re.IGNORECASE)
+        matches = re.findall(pattern, redacted, re.IGNORECASE)
         if matches:
             issues.append(f"{name}: {len(matches)} found")
             redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
+
+    if mentions_protected_value(redacted):
+        issues.append("encoded_protected_value: found")
+        redacted = "[REDACTED]"
 
     return {
         "safe": len(issues) == 0,
@@ -154,7 +169,7 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         """Extract text from LLM response."""
         text = ""
         if hasattr(llm_response, "content") and llm_response.content:
-            for part in llm_response.content.parts:
+            for part in (llm_response.content.parts or []):
                 if hasattr(part, "text") and part.text:
                     text += part.text
         return text
@@ -172,16 +187,26 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
         if not response_text:
             return llm_response
 
-        # TODO: Implement logic:
-        # 1. Call content_filter(response_text)
-        #    - If issues found: replace llm_response.content with redacted version
-        #    - Increment self.redacted_count
-        # 2. If use_llm_judge: call llm_safety_check(response_text)
-        #    - If unsafe: replace llm_response.content with a safe message
-        #    - Increment self.blocked_count
-        # 3. Return llm_response (possibly modified)
-
-        return llm_response  # TODO: modify if needed
+        filtered = content_filter(response_text)
+        if not filtered["safe"]:
+            self.redacted_count += 1
+            response_text = filtered["redacted"]
+            # Replace all parts, including any tool-call payload carrying unsafe text.
+            llm_response.content = types.Content(
+                role="model", parts=[types.Part.from_text(text=response_text)]
+            )
+        if self.use_llm_judge:
+            try:
+                verdict = await llm_safety_check(response_text)
+            except Exception:
+                verdict = {"safe": False}
+            if not verdict["safe"]:
+                self.blocked_count += 1
+                llm_response.content = types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text="Response withheld by safety review.")],
+                )
+        return llm_response
 
 
 # ============================================================
